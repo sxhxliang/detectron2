@@ -22,10 +22,13 @@ from .keypoint_head import build_keypoint_head, keypoint_rcnn_inference, keypoin
 from .mask_head import build_mask_head, mask_rcnn_inference, mask_rcnn_loss
 
 ROI_HEADS_REGISTRY = Registry("ROI_HEADS")
-"""
+ROI_HEADS_REGISTRY.__doc__ = """
 Registry for ROI heads in a generalized R-CNN model.
 ROIHeads take feature maps and region proposals, and
 perform per-region computation.
+
+The registered object will be called with `obj(cfg, input_shape)`.
+The call is expected to return an :class:`ROIHeads`.
 """
 
 logger = logging.getLogger(__name__)
@@ -152,8 +155,8 @@ class ROIHeads(torch.nn.Module):
     def label_and_sample_proposals(self, proposals, targets):
         """
         Prepare some proposals to be used to train the ROI heads.
-        It performs box matching between `proposals` and `targets`, and assign
-        training labels to the lproposals.
+        It performs box matching between `proposals` and `targets`, and assigns
+        training labels to the proposals.
         It returns `self.batch_size_per_image` random samples from proposals and groundtruth boxes,
         with a fraction of positives that is no larger than `self.positive_sample_fraction.
 
@@ -731,8 +734,8 @@ class RROIHeads(StandardROIHeads):
     def label_and_sample_proposals(self, proposals, targets):
         """
         Prepare some proposals to be used to train the RROI heads.
-        It performs box matching between `proposals` and `targets`, and assign
-        training labels to the lproposals.
+        It performs box matching between `proposals` and `targets`, and assigns
+        training labels to the proposals.
         It returns `self.batch_size_per_image` random samples from proposals and groundtruth boxes,
         with a fraction of positives that is no larger than `self.positive_sample_fraction.
 
