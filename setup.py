@@ -17,7 +17,9 @@ def get_extensions():
 
     main_source = os.path.join(extensions_dir, "vision.cpp")
     sources = glob.glob(os.path.join(extensions_dir, "**", "*.cpp"))
-    source_cuda = glob.glob(os.path.join(extensions_dir, "**", "*.cu"))
+    source_cuda = glob.glob(os.path.join(extensions_dir, "**", "*.cu")) + glob.glob(
+        os.path.join(extensions_dir, "*.cu")
+    )
 
     sources = [main_source] + sources
 
@@ -76,9 +78,10 @@ setup(
         "cloudpickle",
         "matplotlib",
         "tqdm>4.29.0",
-        "shapely",
         "tensorboard",
+        "fvcore @ git+https://github.com/facebookresearch/fvcore.git"
     ],
+    extras_require={"all": ["shapely", "psutil"]},
     ext_modules=get_extensions(),
     cmdclass={"build_ext": torch.utils.cpp_extension.BuildExtension},
 )

@@ -9,9 +9,8 @@ also installs detectron2 with a few simple commands.
 - Python >= 3.6
 - PyTorch 1.3
 - [torchvision](https://github.com/pytorch/vision/) that matches the PyTorch installation.
-	You can install them together at [pytorch.org](http://pytorch.org) to make sure of this.
+	You can install them together at [pytorch.org](https://pytorch.org) to make sure of this.
 - OpenCV, needed by demo and visualization
-- [fvcore](https://github.com/facebookresearch/fvcore/): `pip install 'git+https://github.com/facebookresearch/fvcore'`
 - pycocotools: `pip install cython; pip install 'git+https://github.com/cocodataset/cocoapi.git#subdirectory=PythonAPI'`
 - GCC >= 4.9
 
@@ -55,3 +54,10 @@ Note: you may need to rebuild detectron2 after reinstalling a different build of
 	not match the version of cuda you are running with.
 	This happens sometimes when using anaconda.
 
++ "Not compiled with GPU support": make sure
+	```
+	python -c 'import torch; from torch.utils.cpp_extension import CUDA_HOME; print(torch.cuda.is_available(), CUDA_HOME)'
+	```
+	print valid outputs at the time you build detectron2.
+
++ "invalid device function": you build detectron2 with one version of CUDA but run it with a different version.
