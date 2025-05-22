@@ -1,6 +1,5 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 import functools
-import glob
 import json
 import logging
 import multiprocessing as mp
@@ -8,11 +7,11 @@ import numpy as np
 import os
 from itertools import chain
 import pycocotools.mask as mask_util
-from fvcore.common.file_io import PathManager
 from PIL import Image
 
 from detectron2.structures import BoxMode
 from detectron2.utils.comm import get_world_size
+from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
 
 try:
@@ -25,7 +24,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def get_cityscapes_files(image_dir, gt_dir):
+def _get_cityscapes_files(image_dir, gt_dir):
     files = []
     # scan through the directory
     cities = PathManager.ls(image_dir)
@@ -37,7 +36,7 @@ def get_cityscapes_files(image_dir, gt_dir):
             image_file = os.path.join(city_img_dir, basename)
 
             suffix = "leftImg8bit.png"
-            assert basename.endswith(suffix)
+            assert basename.endswith(suffix), basename
             basename = basename[: -len(suffix)]
 
             instance_file = os.path.join(city_gt_dir, basename + "gtFine_instanceIds.png")
@@ -69,7 +68,7 @@ def load_cityscapes_instances(image_dir, gt_dir, from_json=True, to_polygons=Tru
             "Cityscapes's json annotations are in polygon format. "
             "Converting to mask format is not supported now."
         )
-    files = get_cityscapes_files(image_dir, gt_dir)
+    files = _get_cityscapes_files(image_dir, gt_dir)
 
     logger.info("Preprocessing cityscapes annotations ...")
     # This is still not fast: all workers will execute duplicate works and will
@@ -77,13 +76,13 @@ def load_cityscapes_instances(image_dir, gt_dir, from_json=True, to_polygons=Tru
     pool = mp.Pool(processes=max(mp.cpu_count() // get_world_size() // 2, 4))
 
     ret = pool.map(
-        functools.partial(cityscapes_files_to_dict, from_json=from_json, to_polygons=to_polygons),
+        functools.partial(_cityscapes_files_to_dict, from_json=from_json, to_polygons=to_polygons),
         files,
     )
     logger.info("Loaded {} images from {}".format(len(ret), image_dir))
 
     # Map cityscape ids to contiguous ids
-    from cityscapesscripts.helpers.labels import labels
+    from deeplearning.projects.cityscapesApi.cityscapesscripts.helpers.labels import labels
 
     labels = [l for l in labels if l.hasInstances and not l.ignoreInEval]
     dataset_id_to_contiguous_id = {l.id: idx for idx, l in enumerate(labels)}
@@ -104,17 +103,10 @@ def load_cityscapes_semantic(image_dir, gt_dir):
             "sem_seg_file_name".
     """
     ret = []
-    for image_file in glob.glob(os.path.join(image_dir, "**/*.png")):
-        suffix = "leftImg8bit.png"
-        assert image_file.endswith(suffix)
-        prefix = image_dir
-
-        label_file = gt_dir + image_file[len(prefix) : -len(suffix)] + "gtFine_labelTrainIds.png"
-        assert os.path.isfile(
-            label_file
-        ), "Please generate labelTrainIds.png with cityscapesscripts/preparation/createTrainIdLabelImgs.py"  # noqa
-
-        json_file = gt_dir + image_file[len(prefix) : -len(suffix)] + "gtFine_polygons.json"
+    # gt_dir is small and contain many small files. make sense to fetch to local first
+    gt_dir = PathManager.get_local_path(gt_dir)
+    for image_file, _, label_file, json_file in _get_cityscapes_files(image_dir, gt_dir):
+        label_file = label_file.replace("labelIds", "labelTrainIds")
 
         with PathManager.open(json_file, "r") as f:
             jsonobj = json.load(f)
@@ -126,12 +118,16 @@ def load_cityscapes_semantic(image_dir, gt_dir):
                 "width": jsonobj["imgWidth"],
             }
         )
+    assert len(ret), f"No images found in {image_dir}!"
+    assert PathManager.isfile(
+        ret[0]["sem_seg_file_name"]
+    ), "Please generate labelTrainIds.png with cityscapesscripts/preparation/createTrainIdLabelImgs.py"  # noqa
     return ret
 
 
-def cityscapes_files_to_dict(files, from_json, to_polygons):
+def _cityscapes_files_to_dict(files, from_json, to_polygons):
     """
-    Parse cityscapes annotation files to a dict.
+    Parse cityscapes annotation files to a instance segmentation dataset dict.
 
     Args:
         files (tuple): consists of (image_file, instance_id_file, label_id_file, json_file)
@@ -142,7 +138,10 @@ def cityscapes_files_to_dict(files, from_json, to_polygons):
     Returns:
         A dict in Detectron2 Dataset format.
     """
-    from cityscapesscripts.helpers.labels import id2label, name2label
+    from deeplearning.projects.cityscapesApi.cityscapesscripts.helpers.labels import (
+        id2label,
+        name2label,
+    )
 
     image_file, instance_id_file, _, json_file = files
 
@@ -282,7 +281,8 @@ def cityscapes_files_to_dict(files, from_json, to_polygons):
     return ret
 
 
-if __name__ == "__main__":
+def main() -> None:
+    global logger, labels
     """
     Test the cityscapes dataset loader.
 
@@ -297,9 +297,9 @@ if __name__ == "__main__":
     parser.add_argument("gt_dir")
     parser.add_argument("--type", choices=["instance", "semantic"], default="instance")
     args = parser.parse_args()
+    from deeplearning.projects.cityscapesApi.cityscapesscripts.helpers.labels import labels
     from detectron2.data.catalog import Metadata
     from detectron2.utils.visualizer import Visualizer
-    from cityscapesscripts.helpers.labels import labels
 
     logger = setup_logger(name=__name__)
 
@@ -319,15 +319,19 @@ if __name__ == "__main__":
         dicts = load_cityscapes_semantic(args.image_dir, args.gt_dir)
         logger.info("Done loading {} samples.".format(len(dicts)))
 
-        stuff_names = [k.name for k in labels if k.trainId != 255]
+        stuff_classes = [k.name for k in labels if k.trainId != 255]
         stuff_colors = [k.color for k in labels if k.trainId != 255]
-        meta = Metadata().set(stuff_names=stuff_names, stuff_colors=stuff_colors)
+        meta = Metadata().set(stuff_classes=stuff_classes, stuff_colors=stuff_colors)
 
     for d in dicts:
-        img = np.array(Image.open(d["file_name"]))
+        img = np.array(Image.open(PathManager.open(d["file_name"], "rb")))
         visualizer = Visualizer(img, metadata=meta)
         vis = visualizer.draw_dataset_dict(d)
         # cv2.imshow("a", vis.get_image()[:, :, ::-1])
         # cv2.waitKey()
         fpath = os.path.join(dirname, os.path.basename(d["file_name"]))
         vis.save(fpath)
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover

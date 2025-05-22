@@ -1,18 +1,18 @@
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 import numpy as np
 from typing import Any, List, Tuple, Union
 import torch
-
-from detectron2.layers import interpolate
+from torch.nn import functional as F
 
 
 class Keypoints:
     """
-    Stores keypoint annotation data. GT Instances have a `gt_keypoints` property
+    Stores keypoint **annotation** data. GT Instances have a `gt_keypoints` property
     containing the x,y location and visibility flag of each keypoint. This tensor has shape
     (N, K, 3) where N is the number of instances and K is the number of keypoints per instance.
 
     The visibility flag follows the COCO format and must be one of three integers:
+
     * v=0: not labeled (in which case x=y=0)
     * v=1: labeled but not visible
     * v=2: labeled and visible
@@ -42,12 +42,15 @@ class Keypoints:
 
     def to_heatmap(self, boxes: torch.Tensor, heatmap_size: int) -> torch.Tensor:
         """
+        Convert keypoint annotations to a heatmap of one-hot labels for training,
+        as described in :paper:`Mask R-CNN`.
+
         Arguments:
             boxes: Nx4 tensor, the boxes to draw the keypoints to
 
         Returns:
             heatmaps:
-                A tensor of shape (N, K) containing an integer spatial label
+                A tensor of shape (N, K), each element is integer spatial label
                 in the range [0, heatmap_size**2 - 1] for each keypoint in the input.
             valid:
                 A tensor of shape (N, K) containing whether each keypoint is in the roi or not.
@@ -76,6 +79,26 @@ class Keypoints:
         s = self.__class__.__name__ + "("
         s += "num_instances={})".format(len(self.tensor))
         return s
+
+    @staticmethod
+    def cat(keypoints_list: List["Keypoints"]) -> "Keypoints":
+        """
+        Concatenates a list of Keypoints into a single Keypoints
+
+        Arguments:
+            keypoints_list (list[Keypoints])
+
+        Returns:
+            Keypoints: the concatenated Keypoints
+        """
+        assert isinstance(keypoints_list, (list, tuple))
+        assert len(keypoints_list) > 0
+        assert all(isinstance(keypoints, Keypoints) for keypoints in keypoints_list)
+
+        cat_kpts = type(keypoints_list[0])(
+            torch.cat([kpts.tensor for kpts in keypoints_list], dim=0)
+        )
+        return cat_kpts
 
 
 # TODO make this nicer, this is a direct translation from C2 (but removing the inner loop)
@@ -138,7 +161,7 @@ def _keypoints_to_heatmap(
     return heatmaps, valid
 
 
-@torch.no_grad()
+@torch.jit.script_if_tracing
 def heatmaps_to_keypoints(maps: torch.Tensor, rois: torch.Tensor) -> torch.Tensor:
     """
     Extract predicted keypoint locations from heatmaps.
@@ -156,6 +179,7 @@ def heatmaps_to_keypoints(maps: torch.Tensor, rois: torch.Tensor) -> torch.Tenso
     we maintain consistency with :meth:`Keypoints.to_heatmap` by using the conversion from
     Heckbert 1990: c = d + 0.5, where d is a discrete coordinate and c is a continuous coordinate.
     """
+
     offset_x = rois[:, 0]
     offset_y = rois[:, 1]
 
@@ -174,9 +198,11 @@ def heatmaps_to_keypoints(maps: torch.Tensor, rois: torch.Tensor) -> torch.Tenso
 
     for i in range(num_rois):
         outsize = (int(heights_ceil[i]), int(widths_ceil[i]))
-        roi_map = interpolate(maps[[i]], size=outsize, mode="bicubic", align_corners=False).squeeze(
-            0
-        )  # #keypoints x H x W
+        roi_map = F.interpolate(maps[[i]], size=outsize, mode="bicubic", align_corners=False)
+
+        # Although semantically equivalent, `reshape` is used instead of `squeeze` due
+        # to limitation during ONNX export of `squeeze` in scripting mode
+        roi_map = roi_map.reshape(roi_map.shape[1:])  # keypoints x H x W
 
         # softmax over the spatial region
         max_score, _ = roi_map.view(num_keypoints, -1).max(1)

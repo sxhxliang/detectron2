@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-# Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+# Copyright (c) Facebook, Inc. and its affiliates.
 
 import argparse
 import json
@@ -8,10 +8,10 @@ import os
 from collections import defaultdict
 import cv2
 import tqdm
-from fvcore.common.file_io import PathManager
 
 from detectron2.data import DatasetCatalog, MetadataCatalog
 from detectron2.structures import Boxes, BoxMode, Instances
+from detectron2.utils.file_io import PathManager
 from detectron2.utils.logger import setup_logger
 from detectron2.utils.visualizer import Visualizer
 
@@ -22,7 +22,7 @@ def create_instances(predictions, image_size):
     score = np.asarray([x["score"] for x in predictions])
     chosen = (score > args.conf_threshold).nonzero()[0]
     score = score[chosen]
-    bbox = np.asarray([predictions[i]["bbox"] for i in chosen])
+    bbox = np.asarray([predictions[i]["bbox"] for i in chosen]).reshape(-1, 4)
     bbox = BoxMode.convert(bbox, BoxMode.XYWH_ABS, BoxMode.XYXY_ABS)
 
     labels = np.asarray([dataset_id_map(predictions[i]["category_id"]) for i in chosen])
@@ -38,7 +38,8 @@ def create_instances(predictions, image_size):
     return ret
 
 
-if __name__ == "__main__":
+def main() -> None:
+    global args, dataset_id_map
     parser = argparse.ArgumentParser(
         description="A script that visualizes the json predictions from COCO or LVIS dataset."
     )
@@ -48,7 +49,7 @@ if __name__ == "__main__":
     parser.add_argument("--conf-threshold", default=0.5, type=float, help="confidence threshold")
     args = parser.parse_args()
 
-    logger = setup_logger()
+    setup_logger()
 
     with PathManager.open(args.input, "r") as f:
         predictions = json.load(f)
@@ -88,3 +89,7 @@ if __name__ == "__main__":
 
         concat = np.concatenate((vis_pred, vis_gt), axis=1)
         cv2.imwrite(os.path.join(args.output, basename), concat[:, :, ::-1])
+
+
+if __name__ == "__main__":
+    main()  # pragma: no cover
